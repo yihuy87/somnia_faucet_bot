@@ -1,1 +1,6 @@
+web3
+requests
+python-dotenv
+undetected-chromedriver
+selenium
 
