@@ -1,93 +1,93 @@
-import json, time, os
-import requests
 from web3 import Web3
-from dotenv import load_dotenv
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-import undetected_chromedriver as uc
+from eth_account import Account
+import requests
+import time
+import json
 
-load_dotenv()
+# ====== Konfigurasi utama ======
+RPC_URL = "https://dream-rpc.somnia.network"
+FAUCET_URL = "https://testnet.somnia.network/api/faucet"
+WALLET_COUNT = 1000
+WALLET_OUTPUT_FILE = "wallets.json"
+DESTINATION_WALLET = "0x1234567890abcdef1234567890abcdef12345678"
+SEND_AMOUNT_STT = 0.4
+GAS_LIMIT = 31500
+GAS_PRICE = Web3.to_wei("7.2", "gwei")
 
-RPC_URL = os.getenv("RPC_URL")
-FAUCET_URL = os.getenv("FAUCET_URL")
-COLLECTOR_ADDRESS = os.getenv("COLLECTOR_ADDRESS")
-w3 = Web3(Web3.HTTPProvider(RPC_URL))
+web3 = Web3(Web3.HTTPProvider(RPC_URL))
 
-# Load wallets
-with open("wallets.json") as f:
-    PRIVATE_KEYS = json.load(f)
 
-def claim_faucet_selenium(wallet_address):
+# ====== Step 1: Generate wallet ======
+def generate_wallets(n):
+    wallets = []
+    for _ in range(n):
+        acct = Account.create()
+        wallets.append({
+            "address": acct.address,
+            "private_key": acct.key.hex()
+        })
+    with open(WALLET_OUTPUT_FILE, "w") as f:
+        json.dump(wallets, f, indent=2)
+    print(f"{n} wallet disimpan ke {WALLET_OUTPUT_FILE}")
+
+
+# ====== Step 2: Claim faucet dari API ======
+def claim_faucet(address):
     try:
-        options = uc.ChromeOptions()
-        options.headless = True
-        driver = uc.Chrome(options=options)
-        driver.get("https://faucet.somnia.network/")
-
-        time.sleep(5)  # tunggu loading
-
-        # Masukkan address ke input
-        addr_input = driver.find_element(By.CSS_SELECTOR, "input[type='text']")
-        addr_input.clear()
-        addr_input.send_keys(wallet_address)
-
-        # Klik tombol claim
-        claim_btn = driver.find_element(By.CSS_SELECTOR, "button")
-        claim_btn.click()
-
-        time.sleep(10)  # tunggu proses klaim selesai
-        driver.quit()
-        print(f"✅ Faucet klaim untuk {wallet_address}")
+        res = requests.post(FAUCET_URL, json={"address": address})
+        print(f"[Faucet] {address[:10]}...: {res.json()}")
+        return res.ok
     except Exception as e:
-        print(f"❌ Gagal klaim faucet untuk {wallet_address}: {e}")
+        print(f"[Faucet Error] {address}: {e}")
+        return False
 
-def wait_for_balance(wallet_address, min_balance_eth=0.45, max_wait_sec=300):
-    waited = 0
-    while waited < max_wait_sec:
-        balance = w3.eth.get_balance(wallet_address)
-        eth_balance = w3.fromWei(balance, 'ether')
-        if eth_balance >= min_balance_eth:
-            return eth_balance
-        time.sleep(15)
-        waited += 15
-    return w3.fromWei(w3.eth.get_balance(wallet_address), 'ether')
 
-def send_to_collector(private_key, index):
-    acct = w3.eth.account.from_key(private_key)
-    address = acct.address
-    print(f"[{index}] Memproses {address}")
-
-    claim_faucet_selenium(address)
-    balance = wait_for_balance(address)
-
-    if balance < 0.45:
-        print(f"⚠️  Saldo {balance} kurang dari 0.45 STT")
-        return
-
-    amount = w3.toWei(0.4, 'ether')
-    gas_price = w3.eth.gas_price
-    nonce = w3.eth.get_transaction_count(address)
+# ====== Step 3: Kirim 0.4 STT ke wallet utama ======
+def send_token(from_privkey, to_address, amount_stt):
+    acct = Account.from_key(from_privkey)
+    from_address = acct.address
+    nonce = web3.eth.get_transaction_count(from_address)
 
     tx = {
-        'to': COLLECTOR_ADDRESS,
-        'value': amount,
-        'gas': 21000,
-        'gasPrice': gas_price,
-        'nonce': nonce,
-        'chainId': w3.eth.chain_id
+        "to": to_address,
+        "value": web3.to_wei(amount_stt, "ether"),
+        "gas": GAS_LIMIT,
+        "gasPrice": GAS_PRICE,
+        "nonce": nonce,
+        "chainId": web3.eth.chain_id,
     }
 
-    signed_tx = w3.eth.account.sign_transaction(tx, private_key=private_key)
-    tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
-    print(f"📤 TX sent: https://explorer.somnia.network/tx/{tx_hash.hex()}")
+    signed_tx = web3.eth.account.sign_transaction(tx, from_privkey)
+    try:
+        tx_hash = web3.eth.send_raw_transaction(signed_tx.rawTransaction)
+        print(f"[Send] {from_address[:10]}... → {to_address[:10]}... | TX: {web3.to_hex(tx_hash)}")
+        return web3.to_hex(tx_hash)
+    except Exception as e:
+        print(f"[Send Error] {from_address}: {e}")
+        return None
 
-def main():
-    for i, pk in enumerate(PRIVATE_KEYS):
-        try:
-            send_to_collector(pk, i + 1)
-            time.sleep(5)  # delay antar wallet
-        except Exception as e:
-            print(f"❌ Error pada wallet [{i + 1}]: {e}")
+
+# ====== Step 4: Jalankan semua langkah ======
+def run():
+    with open(WALLET_OUTPUT_FILE) as f:
+        wallets = json.load(f)
+
+    for i, wallet in enumerate(wallets):
+        print(f"\n===[ {i+1}/{len(wallets)} ]=== {wallet['address']}")
+        success = claim_faucet(wallet["address"])
+        if not success:
+            continue
+
+        # Tunggu STT masuk (bisa disesuaikan)
+        print("Tunggu 10 detik untuk distribusi token...")
+        time.sleep(10)
+
+        send_token(wallet["private_key"], DESTINATION_WALLET, SEND_AMOUNT_STT)
+
 
 if __name__ == "__main__":
-    main()
+    # Step pertama hanya perlu dijalankan sekali
+    # generate_wallets(WALLET_COUNT)
+
+    # Setelah wallet dibuat, jalankan loop auto-claim + auto-send
+    run()
