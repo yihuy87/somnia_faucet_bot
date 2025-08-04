@@ -66,7 +66,7 @@ def send_0_4_stt(private_key, index):
     signed_tx = w3.eth.account.sign_transaction(tx, private_key)
     tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
     print(f"📤 [{index}] Kirim 0.4 STT → {COLLECTOR_ADDRESS}")
-    print(f"🔗 TX: https://explorer.somnia.network/tx/{tx_hash.hex()}")
+    print(f"🔗 TX: https://shannon-explorer.somnia.network/tx/{tx_hash.hex()}")
 
 def main():
     for i, pk in enumerate(PRIVATE_KEYS):
