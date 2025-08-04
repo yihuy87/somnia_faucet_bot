@@ -1,6 +1,3 @@
-wallets.json
-__pycache__/
-*.pyc
 .env
-config.json
+wallets.json
 wallets_full.json
